@@ -1,0 +1,64 @@
+name: Update MahsaNG subscription
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/30 * * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build lightweight subscription
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64
+          import urllib.request
+          from pathlib import Path
+
+          SOURCE = "https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/Sub1.txt"
+          raw = urllib.request.urlopen(SOURCE, timeout=30).read().decode("utf-8", "ignore")
+          wanted = {"vless": [], "vmess": [], "trojan": []}
+
+          for line in raw.splitlines():
+              line = line.strip()
+              low = line.lower()
+              for proto in wanted:
+                  if low.startswith(proto + "://") and line not in wanted[proto]:
+                      wanted[proto].append(line)
+                      break
+
+          selected = []
+          for proto in ("vless", "vmess", "trojan"):
+              selected.extend(wanted[proto][:20])
+
+          if not selected:
+              raise SystemExit("No configs found")
+
+          out = "\n".join(selected) + "\n"
+          Path("mahsa-sub").mkdir(parents=True, exist_ok=True)
+          Path("mahsa-sub/sub.txt").write_text(out, encoding="utf-8")
+          Path("mahsa-sub/sub_base64.txt").write_text(
+              base64.b64encode(out.encode("utf-8")).decode("ascii") + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Commit updated subscription
+        shell: bash
+        run: |
+          if git diff --quiet -- mahsa-sub/sub.txt mahsa-sub/sub_base64.txt; then
+            echo "No changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add mahsa-sub/sub.txt mahsa-sub/sub_base64.txt
+          git commit -m "Update MahsaNG subscription"
+          git push
